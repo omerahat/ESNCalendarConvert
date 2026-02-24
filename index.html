@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ESN Calendar Converter</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body class="min-h-screen bg-slate-100 flex items-center justify-center py-8">
+    <div class="max-w-2xl w-full mx-auto bg-white shadow-xl rounded-2xl p-6 md:p-8">
+      <header class="mb-6 text-center">
+        <h1 class="text-2xl md:text-3xl font-bold text-slate-900">
+          ESN Calendar Converter
+        </h1>
+        <p class="mt-2 text-sm text-slate-600">
+          Upload your ESN Excel calendar grid and download a ready-to-import ICS file.
+        </p>
+      </header>
+
+      <section class="mb-4">
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label for="year-input" class="block text-sm font-medium text-slate-700"
+              >Year</label
+            >
+            <input
+              id="year-input"
+              type="number"
+              class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
+              min="1900"
+              max="2100"
+            />
+          </div>
+          <div>
+            <label for="month-input" class="block text-sm font-medium text-slate-700"
+              >Month (1-12)</label
+            >
+            <input
+              id="month-input"
+              type="number"
+              class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
+              min="1"
+              max="12"
+            />
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <div
+          id="drop-zone"
+          class="relative flex flex-col items-center justify-center px-6 py-10 border-2 border-dashed border-slate-300 rounded-xl bg-slate-50 text-center transition hover:border-indigo-400 hover:bg-indigo-50 cursor-pointer"
+        >
+          <svg
+            class="h-10 w-10 text-slate-400 mb-3"
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="1.5"
+              d="M3 15a4 4 0 014-4h1m3-7v12m0-12l-3 3m3-3l3 3M5 19h14"
+            />
+          </svg>
+          <p class="text-sm text-slate-700 font-medium">
+            Drag and drop your <span class="font-semibold">.xlsx</span> file here
+          </p>
+          <p class="mt-1 text-xs text-slate-500">
+            The Excel file should be the ESN calendar grid layout.
+          </p>
+          <button
+            id="select-file-btn"
+            type="button"
+            class="mt-4 inline-flex items-center px-4 py-2 rounded-md bg-indigo-600 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+          >
+            Select File
+          </button>
+          <input
+            id="file-input"
+            type="file"
+            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            class="hidden"
+          />
+        </div>
+      </section>
+
+      <section class="mt-4">
+        <div
+          id="status"
+          class="hidden rounded-md border px-3 py-2 text-sm"
+        ></div>
+      </section>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script>
+      function setStatus(message, type) {
+        const statusEl = document.getElementById("status");
+        statusEl.classList.remove(
+          "hidden",
+          "border-green-200",
+          "bg-green-50",
+          "text-green-800",
+          "border-red-200",
+          "bg-red-50",
+          "text-red-800",
+          "border-sky-200",
+          "bg-sky-50",
+          "text-sky-800",
+          "border-amber-200",
+          "bg-amber-50",
+          "text-amber-800"
+        );
+
+        if (type === "success") {
+          statusEl.classList.add(
+            "border-green-200",
+            "bg-green-50",
+            "text-green-800"
+          );
+        } else if (type === "error") {
+          statusEl.classList.add("border-red-200", "bg-red-50", "text-red-800");
+        } else if (type === "warning") {
+          statusEl.classList.add(
+            "border-amber-200",
+            "bg-amber-50",
+            "text-amber-800"
+          );
+        } else {
+          statusEl.classList.add("border-sky-200", "bg-sky-50", "text-sky-800");
+        }
+
+        statusEl.textContent = message;
+      }
+
+      function escapeICS(text) {
+        return text
+          .replace(/\\/g, "\\\\")
+          .replace(/\r?\n/g, "\\n")
+          .replace(/,/g, "\\,")
+          .replace(/;/g, "\\;");
+      }
+
+      function formatDateICS(date) {
+        const y = String(date.getFullYear()).padStart(4, "0");
+        const m = String(date.getMonth() + 1).padStart(2, "0");
+        const d = String(date.getDate()).padStart(2, "0");
+        return y + m + d;
+      }
+
+      function formatTimestampUTC(date) {
+        return date.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
+      }
+
+      function parseAndConvert(file) {
+        if (!file) {
+          setStatus("No file selected.", "error");
+          return;
+        }
+
+        const yearInput = document.getElementById("year-input");
+        const monthInput = document.getElementById("month-input");
+
+        const year = parseInt(yearInput.value, 10);
+        const month = parseInt(monthInput.value, 10);
+
+        if (!year || year < 1900 || year > 2100) {
+          setStatus("Please enter a valid year (1900–2100).", "error");
+          return;
+        }
+
+        if (!month || month < 1 || month > 12) {
+          setStatus("Please enter a valid month between 1 and 12.", "error");
+          return;
+        }
+
+        const fileName = file.name || "";
+        if (!fileName.toLowerCase().endsWith(".xlsx")) {
+          setStatus("Please upload a .xlsx Excel file.", "error");
+          return;
+        }
+
+        setStatus("Reading and parsing Excel file…", "info");
+
+        const reader = new FileReader();
+        reader.onerror = () => {
+          setStatus("Failed to read the file.", "error");
+        };
+
+        reader.onload = (e) => {
+          try {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, { type: "array" });
+            const firstSheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[firstSheetName];
+
+            const rows = XLSX.utils.sheet_to_json(worksheet, {
+              header: 1,
+              raw: true,
+            });
+
+            const events = [];
+            let prevDay = 0;
+
+            for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+              const row = rows[rowIndex] || [];
+              for (let colIndex = 0; colIndex < row.length; colIndex++) {
+                const cellValue = row[colIndex];
+
+                let day = parseInt(cellValue, 10);
+                if (Number.isNaN(day) || day < 1 || day > 31) {
+                  continue;
+                }
+
+                if (day < 10 && prevDay > 25) {
+                  continue;
+                }
+
+                prevDay = Math.max(prevDay, day);
+
+                const nextRow = rows[rowIndex + 1];
+                if (!nextRow) continue;
+
+                let eventText = nextRow[colIndex];
+                if (eventText === null || eventText === undefined) continue;
+
+                eventText = String(eventText).trim();
+                if (!eventText) continue;
+
+                eventText = eventText.replace(/\s+/g, " ").trim();
+
+                if (eventText.length < 2) continue;
+
+                let title = eventText;
+                let description = "";
+
+                const ocIndex = eventText.indexOf("OC:");
+                if (ocIndex !== -1) {
+                  const before = eventText.slice(0, ocIndex);
+                  const after = eventText.slice(ocIndex + "OC:".length);
+
+                  title = before.trim().replace(/\s+/g, " ");
+
+                  const ocPart = after.trim();
+                  if (ocPart) {
+                    description = "OC: " + ocPart;
+                  }
+                } else {
+                  title = eventText;
+                }
+
+                const eventDate = new Date(year, month - 1, day);
+                if (Number.isNaN(eventDate.getTime())) {
+                  continue;
+                }
+
+                events.push({
+                  title,
+                  description,
+                  date: eventDate,
+                });
+              }
+            }
+
+            if (events.length === 0) {
+              setStatus(
+                "No valid events were found in the provided Excel grid.",
+                "warning"
+              );
+              return;
+            }
+
+            const lines = [];
+            lines.push("BEGIN:VCALENDAR");
+            lines.push("VERSION:2.0");
+            lines.push("PRODID:-//ESN Calendar Converter//EN");
+            lines.push("X-WR-TIMEZONE:Europe/Istanbul");
+
+            const now = new Date();
+            const dtstamp = formatTimestampUTC(now);
+
+            events.forEach((evt, index) => {
+              const startStr = formatDateICS(evt.date);
+              const endDate = new Date(evt.date.getTime());
+              endDate.setDate(endDate.getDate() + 1);
+              const endStr = formatDateICS(endDate);
+
+              const uid = `esn-${Date.now()}-${index}@esn-calendar`;
+              const summary = escapeICS(evt.title || "");
+              const description = evt.description
+                ? escapeICS(evt.description)
+                : "";
+
+              lines.push("BEGIN:VEVENT");
+              lines.push("UID:" + uid);
+              lines.push("DTSTAMP:" + dtstamp);
+              lines.push("DTSTART;VALUE=DATE:" + startStr);
+              lines.push("DTEND;VALUE=DATE:" + endStr);
+              if (summary) {
+                lines.push("SUMMARY:" + summary);
+              }
+              if (description) {
+                lines.push("DESCRIPTION:" + description);
+              }
+              lines.push("END:VEVENT");
+            });
+
+            lines.push("END:VCALENDAR");
+
+            const icsContent = lines.join("\r\n");
+            const blob = new Blob([icsContent], {
+              type: "text/calendar;charset=utf-8",
+            });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = "ESN_Events.ics";
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            setStatus(
+              `Success! Generated ${events.length} event(s) and downloaded ESN_Events.ics.`,
+              "success"
+            );
+          } catch (err) {
+            console.error(err);
+            setStatus(
+              "An error occurred while processing the Excel file.",
+              "error"
+            );
+          }
+        };
+
+        reader.readAsArrayBuffer(file);
+      }
+
+      document.addEventListener("DOMContentLoaded", () => {
+        const now = new Date();
+        const yearInput = document.getElementById("year-input");
+        const monthInput = document.getElementById("month-input");
+        yearInput.value = now.getFullYear();
+        monthInput.value = now.getMonth() + 1;
+
+        const dropZone = document.getElementById("drop-zone");
+        const fileInput = document.getElementById("file-input");
+        const selectFileBtn = document.getElementById("select-file-btn");
+
+        const activateDropZone = () => {
+          dropZone.classList.add("border-indigo-500", "bg-indigo-50");
+        };
+
+        const deactivateDropZone = () => {
+          dropZone.classList.remove("border-indigo-500", "bg-indigo-50");
+        };
+
+        dropZone.addEventListener("click", () => {
+          fileInput.click();
+        });
+
+        selectFileBtn.addEventListener("click", (event) => {
+          event.stopPropagation();
+          fileInput.click();
+        });
+
+        fileInput.addEventListener("change", (event) => {
+          const file = event.target.files && event.target.files[0];
+          if (file) {
+            parseAndConvert(file);
+          }
+        });
+
+        ["dragenter", "dragover"].forEach((eventName) => {
+          dropZone.addEventListener(eventName, (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            activateDropZone();
+          });
+        });
+
+        ["dragleave", "drop"].forEach((eventName) => {
+          dropZone.addEventListener(eventName, (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (eventName === "drop") {
+              const dt = event.dataTransfer;
+              if (dt && dt.files && dt.files[0]) {
+                parseAndConvert(dt.files[0]);
+              }
+            }
+            deactivateDropZone();
+          });
+        });
+      });
+    </script>
+  </body>
+</html>
