@@ -1,0 +1,20 @@
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# macOS
+.DS_Store
+
+# Calendar and spreadsheet exports (not codebase)
+*.ics
+*.xlsx
+*.xls
+
+# Other common non-code artifacts
+*.log
+
